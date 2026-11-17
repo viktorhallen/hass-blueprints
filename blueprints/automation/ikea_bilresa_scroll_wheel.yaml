@@ -1,0 +1,261 @@
+blueprint:
+  name: IKEA BILRESA scroll wheel (ZHA)
+  description: >-
+    Control lights with the IKEA BILRESA scroll wheel (E2490, model 09BA)
+    paired through ZHA.
+
+
+    **Press** toggles the lights. The remote keeps its own on/off state and
+    alternates between sending "on" and "off", so both are treated as the same
+    button: if any selected light is on, all turn off, otherwise all turn on.
+
+
+    **Scroll** dims relative to where each light is now. The remote only sends
+    an absolute level (0–255), so this blueprint remembers the last level in a
+    number helper and uses the difference. When the remote's level is stuck at
+    its top or bottom, further scrolling keeps dimming in that direction.
+
+
+    **Setup:** create a Number helper (Settings → Devices & services →
+    Helpers → Number) with minimum 0, maximum 255, step 1, and select it below.
+    The first scroll after setup may jump once while the helper catches up with
+    the remote.
+  domain: automation
+  author: viktorhallen
+  source_url: https://github.com/viktorhallen/hass-blueprints/blob/main/blueprints/automation/ikea_bilresa_scroll_wheel.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    remote:
+      name: Remote
+      description: The BILRESA scroll wheel.
+      selector:
+        device:
+          filter:
+            - integration: zha
+              model: "09BA"
+    level_helper:
+      name: Level helper
+      description: >-
+        Number helper (0–255, step 1) used to remember the remote's last level.
+        Use one helper per remote.
+      selector:
+        entity:
+          filter:
+            - domain: input_number
+    light_section:
+      name: Light control
+      icon: mdi:lightbulb-group
+      input:
+        lights:
+          name: Light(s)
+          description: Leave empty to only use the custom actions.
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: light
+        sensitivity:
+          name: Scroll sensitivity
+          description: Multiplier for how much brightness changes per scroll tick.
+          default: 1
+          selector:
+            number:
+              min: 0.25
+              max: 4
+              step: 0.25
+              mode: slider
+        limit_step:
+          name: Step past the end
+          description: >-
+            Brightness change (out of 255) per scroll event once the remote's
+            own level is stuck at its top or bottom.
+          default: 15
+          selector:
+            number:
+              min: 1
+              max: 64
+              mode: slider
+        min_brightness:
+          name: Minimum brightness
+          description: Scrolling down stops here (out of 255).
+          default: 3
+          selector:
+            number:
+              min: 1
+              max: 128
+              mode: slider
+        scroll_turns_off:
+          name: Scrolling down can turn lights off
+          description: When on, scrolling below the minimum turns the light off.
+          default: false
+          selector:
+            boolean: {}
+        scroll_turns_on:
+          name: Scrolling up can turn lights on
+          description: When on, scrolling up on a light that is off turns it on.
+          default: true
+          selector:
+            boolean: {}
+    custom_section:
+      name: Custom actions
+      icon: mdi:gesture-tap-button
+      collapsed: true
+      input:
+        press_action:
+          name: Press
+          description: Runs on every press, in addition to toggling the lights.
+          default: []
+          selector:
+            action: {}
+        scroll_action:
+          name: Scroll
+          description: >-
+            Runs on every scroll event. The variable `step` holds the
+            brightness change (positive up, negative down, out of 255).
+          default: []
+          selector:
+            action: {}
+
+# Scroll events must be handled one at a time and in order, since each one is
+# a difference against the level stored by the previous one.
+mode: queued
+max: 20
+max_exceeded: silent
+
+triggers:
+  - trigger: event
+    event_type: zha_event
+    event_data:
+      device_id: !input remote
+      command: "on"
+    id: press
+  - trigger: event
+    event_type: zha_event
+    event_data:
+      device_id: !input remote
+      command: "off"
+    id: press
+  - trigger: event
+    event_type: zha_event
+    event_data:
+      device_id: !input remote
+      command: move_to_level
+    id: scroll
+  - trigger: event
+    event_type: zha_event
+    event_data:
+      device_id: !input remote
+      command: move_to_level_with_on_off
+    id: scroll
+
+variables:
+  lights: !input lights
+  level_helper: !input level_helper
+  sensitivity: !input sensitivity
+  limit_step: !input limit_step
+  min_brightness: !input min_brightness
+  scroll_turns_off: !input scroll_turns_off
+  scroll_turns_on: !input scroll_turns_on
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: press
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ lights | count > 0 }}"
+            then:
+              - if:
+                  - condition: template
+                    value_template: >-
+                      {{ lights | select('is_state', 'on') | list | count > 0 }}
+                then:
+                  - action: light.turn_off
+                    target:
+                      entity_id: "{{ lights }}"
+                else:
+                  - action: light.turn_on
+                    target:
+                      entity_id: "{{ lights }}"
+          - choose: []
+            default: !input press_action
+
+      - conditions:
+          - condition: trigger
+            id: scroll
+        sequence:
+          - variables:
+              # Newer ZHA puts the level in params; older versions only in args.
+              level: >-
+                {% set d = trigger.event.data %}
+                {% set p = d.get('params') or {} %}
+                {% set a = d.get('args') %}
+                {% if p.get('level') is not none %}{{ p.get('level') | int }}
+                {% elif a is mapping and a.get('level') is not none %}{{ a.get('level') | int }}
+                {% elif a is sequence and a is not string and a | count > 0 %}{{ a[0] | int }}
+                {% else %}-1{% endif %}
+              previous: "{{ states(level_helper) | float(-1) | int }}"
+              # Difference since last event. If the remote repeats the same
+              # level at its top or bottom, keep going in that direction.
+              step: >-
+                {% if level < 0 or previous < 0 %}0
+                {% elif level != previous %}{{ ((level - previous) * sensitivity) | round(0) | int }}
+                {% elif level >= 250 %}{{ limit_step | int }}
+                {% elif level <= 5 %}{{ -(limit_step | int) }}
+                {% else %}0{% endif %}
+          - condition: template
+            value_template: "{{ level >= 0 }}"
+          - action: input_number.set_value
+            target:
+              entity_id: "{{ level_helper }}"
+            data:
+              value: "{{ [[level, 0] | max, 255] | min }}"
+          - condition: template
+            value_template: "{{ step != 0 }}"
+          - repeat:
+              for_each: "{{ lights }}"
+              sequence:
+                - variables:
+                    is_on: "{{ is_state(repeat.item, 'on') }}"
+                    current: >-
+                      {{ (state_attr(repeat.item, 'brightness') | int(0)) if is_on else 0 }}
+                    wanted: "{{ current + step }}"
+                - choose:
+                    # Scrolling up
+                    - conditions:
+                        - condition: template
+                          value_template: "{{ step > 0 and (is_on or scroll_turns_on) }}"
+                      sequence:
+                        - action: light.turn_on
+                          target:
+                            entity_id: "{{ repeat.item }}"
+                          data:
+                            brightness: >-
+                              {{ [[wanted, min_brightness | int] | max, 255] | min }}
+                            transition: 0.3
+                    # Scrolling down past the minimum, allowed to turn off
+                    - conditions:
+                        - condition: template
+                          value_template: >-
+                            {{ step < 0 and is_on and wanted < min_brightness and scroll_turns_off }}
+                      sequence:
+                        - action: light.turn_off
+                          target:
+                            entity_id: "{{ repeat.item }}"
+                    # Scrolling down, stop at the minimum
+                    - conditions:
+                        - condition: template
+                          value_template: "{{ step < 0 and is_on and current > min_brightness }}"
+                      sequence:
+                        - action: light.turn_on
+                          target:
+                            entity_id: "{{ repeat.item }}"
+                          data:
+                            brightness: "{{ [wanted, min_brightness | int] | max }}"
+                            transition: 0.3
+          - choose: []
+            default: !input scroll_action

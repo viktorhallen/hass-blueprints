@@ -19,3 +19,19 @@ For the IKEA BILRESA two-button remote (model `09B9`) paired with ZHA.
 
 Every event (including hold and release) also has an optional custom action, so
 the blueprint is usable without a light. Requires Home Assistant 2024.10 or newer.
+
+### IKEA BILRESA scroll wheel (ZHA)
+
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fviktorhallen%2Fhass-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fikea_bilresa_scroll_wheel.yaml)
+
+File: [blueprints/automation/ikea_bilresa_scroll_wheel.yaml](blueprints/automation/ikea_bilresa_scroll_wheel.yaml)
+
+For the IKEA BILRESA scroll wheel (E2490, model `09BA`) paired with ZHA.
+
+- **Press:** toggles the lights (any on → all off, otherwise all on).
+- **Scroll:** dims relative to each light's current brightness, and keeps
+  dimming when the remote's own level is stuck at its top or bottom.
+
+Needs a Number helper (0–255, step 1) per remote to remember the remote's last
+level. Optional custom actions for press and scroll. Requires Home Assistant
+2024.10 or newer.
