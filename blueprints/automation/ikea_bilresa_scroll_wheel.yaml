@@ -20,6 +20,11 @@ blueprint:
     Helpers → Number) with minimum 0, maximum 255, step 1, and select it below.
     The first scroll after setup may jump once while the helper catches up with
     the remote.
+
+
+    **Double and triple press** need the small ZHA quirk in this blueprint's
+    repository (`zha_quirks/ikea_bilresa_scroll_wheel.py`). Without it ZHA
+    ignores those presses and the rest of the blueprint still works.
   domain: automation
   author: viktorhallen
   source_url: https://github.com/viktorhallen/hass-blueprints/blob/main/blueprints/automation/ikea_bilresa_scroll_wheel.yaml
@@ -109,6 +114,20 @@ blueprint:
           default: []
           selector:
             action: {}
+        double_action:
+          name: Double press
+          description: >-
+            Needs the ZHA quirk from this repo (zha_quirks/), otherwise ZHA
+            never sees double presses.
+          default: []
+          selector:
+            action: {}
+        triple_action:
+          name: Triple press
+          description: Needs the ZHA quirk from this repo, like double press.
+          default: []
+          selector:
+            action: {}
         scroll_action:
           name: Scroll
           description: >-
@@ -149,6 +168,13 @@ triggers:
       device_id: !input remote
       command: move_to_level_with_on_off
     id: scroll
+  # Only fires with the ZHA quirk from this repo installed.
+  - trigger: event
+    event_type: zha_event
+    event_data:
+      device_id: !input remote
+      command: press
+    id: multi_press
 
 variables:
   lights: !input lights
@@ -183,6 +209,29 @@ actions:
                       entity_id: "{{ lights }}"
           - choose: []
             default: !input press_action
+
+      - conditions:
+          - condition: trigger
+            id: multi_press
+        sequence:
+          - variables:
+              presses: >-
+                {% set d = trigger.event.data %}
+                {% set p = d.get('params') or {} %}
+                {% set a = d.get('args') %}
+                {% if p.get('param1') is not none %}{% set v = p.get('param1') | int %}
+                {% elif a is sequence and a is not string and a | count > 0 %}{% set v = a[0] | int %}
+                {% else %}{% set v = 0 %}{% endif %}
+                {{ {256: 2, 257: 3}.get(v, 0) }}
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ presses == 2 }}"
+                sequence: !input double_action
+              - conditions:
+                  - condition: template
+                    value_template: "{{ presses == 3 }}"
+                sequence: !input triple_action
 
       - conditions:
           - condition: trigger

@@ -32,6 +32,26 @@ For the IKEA BILRESA scroll wheel (E2490, model `09BA`) paired with ZHA.
 - **Scroll:** dims relative to each light's current brightness, and keeps
   dimming when the remote's own level is stuck at its top or bottom.
 
+- **Double / triple press:** custom actions, with the ZHA quirk below.
+
 Needs a Number helper (0–255, step 1) per remote to remember the remote's last
 level. Optional custom actions for press and scroll. Requires Home Assistant
 2024.10 or newer.
+
+#### ZHA quirk for double and triple press
+
+Out of the box ZHA drops the scroll wheel's double and triple presses (Zigbee2MQTT
+supports them). [zha_quirks/ikea_bilresa_scroll_wheel.py](zha_quirks/ikea_bilresa_scroll_wheel.py)
+adds them:
+
+1. Copy the file to e.g. `/config/custom_zha_quirks/`.
+2. Point ZHA at that folder in `configuration.yaml`:
+
+   ```yaml
+   zha:
+     custom_quirks_path: /config/custom_zha_quirks/
+   ```
+
+3. Restart Home Assistant. The device page should show
+   `Quirk: ...ikea_bilresa_scroll_wheel`. If it doesn't, remove and re-pair the
+   remote.
