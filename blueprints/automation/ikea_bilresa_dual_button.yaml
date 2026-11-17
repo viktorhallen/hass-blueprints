@@ -1,0 +1,276 @@
+blueprint:
+  name: IKEA BILRESA dual button (ZHA)
+  description: >-
+    Control lights with the IKEA BILRESA two-button remote (model 09B9) paired
+    through ZHA.
+
+
+    **Default behavior when a light is selected**
+
+    - **I** (top) short press: turn on
+
+    - **O** (bottom) short press: turn off
+
+    - **I** hold: dim up until released
+
+    - **O** hold: dim down until released (dimming all the way down turns
+    the light off)
+
+
+    Double presses have no default and are free for your own actions. Every
+    button event also has an optional custom action that runs in addition to
+    the light control, so the blueprint works without a light too.
+  domain: automation
+  author: viktorhallen
+  source_url: https://github.com/viktorhallen/hass-blueprints/blob/main/blueprints/automation/ikea_bilresa_dual_button.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    remote:
+      name: Remote
+      description: The BILRESA dual button remote.
+      selector:
+        device:
+          filter:
+            - integration: zha
+              model: "09B9"
+    light_section:
+      name: Light control
+      icon: mdi:lightbulb-group
+      input:
+        light:
+          name: Light(s)
+          description: >-
+            Lights to control with short press and hold. Leave empty to only
+            use the custom actions.
+          default: {}
+          selector:
+            target:
+              entity:
+                domain: light
+        hold_step:
+          name: Hold brightness step
+          description: How much brightness changes per step while a button is held.
+          default: 10
+          selector:
+            number:
+              min: 1
+              max: 50
+              unit_of_measurement: "%"
+        hold_interval:
+          name: Hold step interval
+          description: Time between brightness steps while a button is held.
+          default: 300
+          selector:
+            number:
+              min: 100
+              max: 2000
+              step: 50
+              unit_of_measurement: ms
+        hold_max_steps:
+          name: Max steps per hold
+          description: >-
+            Safety stop in case the release message is lost, so dimming never
+            runs forever.
+          default: 20
+          selector:
+            number:
+              min: 1
+              max: 100
+    custom_section:
+      name: Custom actions
+      icon: mdi:gesture-tap-button
+      collapsed: true
+      input:
+        on_press:
+          name: I – short press
+          default: []
+          selector:
+            action: {}
+        off_press:
+          name: O – short press
+          default: []
+          selector:
+            action: {}
+        on_double:
+          name: I – double press
+          default: []
+          selector:
+            action: {}
+        off_double:
+          name: O – double press
+          default: []
+          selector:
+            action: {}
+        on_hold:
+          name: I – hold
+          description: >-
+            Runs when a hold starts and again each time the remote repeats the
+            hold message (about once a second) until release.
+          default: []
+          selector:
+            action: {}
+        off_hold:
+          name: O – hold
+          description: >-
+            Runs when a hold starts and again each time the remote repeats the
+            hold message (about once a second) until release.
+          default: []
+          selector:
+            action: {}
+        on_release:
+          name: I – released after hold
+          default: []
+          selector:
+            action: {}
+        off_release:
+          name: O – released after hold
+          default: []
+          selector:
+            action: {}
+
+# The remote keeps re-sending the "hold" message about once a second while a
+# button is held. Restart mode makes each repeat and the release message cancel
+# the running dim loop, so dimming stops as soon as the button is let go.
+mode: restart
+max_exceeded: silent
+
+variables:
+  light_target: !input light
+  has_light: >-
+    {{ light_target is mapping and
+       (light_target.values() | reject('in', [none, '', []]) | list | count) > 0 }}
+  hold_step: !input hold_step
+  hold_max_steps: !input hold_max_steps
+
+triggers:
+  - trigger: device
+    domain: zha
+    device_id: !input remote
+    type: remote_button_short_press
+    subtype: turn_on
+    id: on_press
+  - trigger: device
+    domain: zha
+    device_id: !input remote
+    type: remote_button_short_press
+    subtype: turn_off
+    id: off_press
+  - trigger: device
+    domain: zha
+    device_id: !input remote
+    type: remote_button_double_press
+    subtype: dim_up
+    id: on_double
+  - trigger: device
+    domain: zha
+    device_id: !input remote
+    type: remote_button_double_press
+    subtype: dim_down
+    id: off_double
+  - trigger: device
+    domain: zha
+    device_id: !input remote
+    type: remote_button_long_press
+    subtype: dim_up
+    id: on_hold
+  - trigger: device
+    domain: zha
+    device_id: !input remote
+    type: remote_button_long_press
+    subtype: dim_down
+    id: off_hold
+  - trigger: device
+    domain: zha
+    device_id: !input remote
+    type: remote_button_long_release
+    subtype: dim_up
+    id: on_release
+  - trigger: device
+    domain: zha
+    device_id: !input remote
+    type: remote_button_long_release
+    subtype: dim_down
+    id: off_release
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: on_press
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ has_light }}"
+            then:
+              - action: light.turn_on
+                target: !input light
+          - choose: []
+            default: !input on_press
+
+      - conditions:
+          - condition: trigger
+            id: off_press
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ has_light }}"
+            then:
+              - action: light.turn_off
+                target: !input light
+          - choose: []
+            default: !input off_press
+
+      - conditions:
+          - condition: trigger
+            id: on_double
+        sequence:
+          - choose: []
+            default: !input on_double
+
+      - conditions:
+          - condition: trigger
+            id: off_double
+        sequence:
+          - choose: []
+            default: !input off_double
+
+      - conditions:
+          - condition: trigger
+            id: [on_hold, off_hold]
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: trigger
+                    id: on_hold
+                sequence: !input on_hold
+            default: !input off_hold
+          - if:
+              - condition: template
+                value_template: "{{ has_light }}"
+            then:
+              - repeat:
+                  count: "{{ hold_max_steps | int }}"
+                  sequence:
+                    - action: light.turn_on
+                      target: !input light
+                      data:
+                        brightness_step_pct: >-
+                          {{ hold_step | int if trigger.id == 'on_hold' else -(hold_step | int) }}
+                        transition: 0.3
+                    - delay:
+                        milliseconds: !input hold_interval
+
+      - conditions:
+          - condition: trigger
+            id: on_release
+        sequence:
+          - choose: []
+            default: !input on_release
+
+      - conditions:
+          - condition: trigger
+            id: off_release
+        sequence:
+          - choose: []
+            default: !input off_release
