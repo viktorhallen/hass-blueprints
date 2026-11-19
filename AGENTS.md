@@ -7,6 +7,7 @@ renaming a blueprint, and keep `source_url` pointing at the file on `main`.
 ## Layout
 
 - `blueprints/automation/*.yaml` — automation blueprints.
+- `blueprints/script/*.yaml` — script blueprints (one script per preset).
 - `zha_quirks/*.py` — custom ZHA quirks (v2 `QuirkBuilder`, imported from
   `zhaquirks.builder`) for devices where upstream ZHA is missing something.
   Candidates for upstreaming to zigpy/zha-device-handlers.
@@ -63,3 +64,33 @@ renaming a blueprint, and keep `source_url` pointing at the file on `main`.
   just in case).
 - User reported on 2026-11-17 that press and relative scroll dimming work on
   the real device.
+- Bottom button = channel selector for 3 Zigbee groups (21658/21659/21660,
+  LEDs show the active one). It sends nothing itself and only works after
+  Touchlink-binding lights on 2+ channels. Neither Z2M nor (as far as we know)
+  ZHA can tell which channel a command came from. Multi-press "scene" commands
+  are documented by Z2M as going to group 65289. Untested here as of
+  2026-11-19; the user plans to try unlocking a second channel.
+
+### Aqara Ceiling Light T1M (`lumi.light.acn032`, ring effects)
+
+- Upstream ZHA quirk (`zhaquirks.xiaomi.aqara.light_acn`) only adds
+  `power_on_state` (0x0517). Our `zha_quirks/aqara_t1m_ring.py` replaces it,
+  keeping that and adding (from Z2M `lumiT1MEffect` & co., all on cluster
+  0xFCC0 endpoint 1, Lumi manufacturer code via `XiaomiAqaraE1Cluster`):
+  0x051F `effect` (uint32: flow1, flow2, fading, hopping, breathing, rolling),
+  0x0520 `effect_speed` (uint8 0–100), 0x0522 `segment_colors` and 0x0523
+  `effect_colors` (octet strings). Z2M says the effect can't be read back.
+- Writing octet strings from HA: `zha.set_zigbee_cluster_attribute` only
+  accepts int/bool/str, and zha's `convert_zcl_value` does `type(value)` for
+  `LVBytes` (no hex parsing). So the quirk uses a `HexBytes(LVBytes)` type
+  that accepts a hex string. Values carry a `hex:` prefix because HA's native
+  template types would turn an all-digit hex string into a number.
+- Packet formats: effect_colors = `00`, count, then per color CIE x, y scaled
+  to 0–65535 big-endian (sRGB → XYZ → xy, same math as Z2M). segment_colors =
+  4-byte segment bitmask (segment 1 = MSB of byte 0, 26 segments), 4 zero
+  bytes, 4-byte color, one write per color. Segment colors aren't in a
+  blueprint yet.
+- The script blueprint's color template was checked against a port of Z2M's
+  encoder on 2026-11-19 (byte-for-byte match). Untested on the real light:
+  whether the custom quirk overrides the upstream one, the write order
+  (colors → effect → speed), and whether the uint32 effect write is accepted.

@@ -31,7 +31,6 @@ For the IKEA BILRESA scroll wheel (E2490, model `09BA`) paired with ZHA.
 - **Press:** toggles the lights (any on → all off, otherwise all on).
 - **Scroll:** dims relative to each light's current brightness, and keeps
   dimming when the remote's own level is stuck at its top or bottom.
-
 - **Double / triple press:** custom actions, with the ZHA quirk below.
 
 Needs a Number helper (0–255, step 1) per remote to remember the remote's last
@@ -55,3 +54,20 @@ adds them:
 3. Restart Home Assistant. The device page should show
    `Quirk: ...ikea_bilresa_scroll_wheel`. If it doesn't, remove and re-pair the
    remote.
+
+### Aqara T1M ring effect (ZHA, script)
+
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fviktorhallen%2Fhass-blueprints%2Fblob%2Fmain%2Fblueprints%2Fscript%2Faqara_t1m_ring_effect.yaml)
+
+File: [blueprints/script/aqara_t1m_ring_effect.yaml](blueprints/script/aqara_t1m_ring_effect.yaml)
+
+Starts a dynamic effect on the RGB ring of the Aqara Ceiling Light T1M
+(`lumi.light.acn032`). Each script made from it is one preset: effect (flow 1,
+flow 2, fading, hopping, breathing, rolling), speed, ring brightness and 1–4
+colors. Run it from a dashboard or an automation. Stop the effect by setting the
+ring to a plain color or turning it off.
+
+Requires the ZHA quirk [zha_quirks/aqara_t1m_ring.py](zha_quirks/aqara_t1m_ring.py),
+installed the same way as the scroll wheel quirk above (device page should show
+`Quirk: ...aqara_t1m_ring`). The quirk also adds **Ring effect** and **Ring
+effect speed** controls to the light's device page.

@@ -1,0 +1,194 @@
+blueprint:
+  name: Aqara T1M ring effect (ZHA)
+  description: >-
+    Start a dynamic effect on the RGB ring of an Aqara Ceiling Light T1M
+    (lumi.light.acn032) paired through ZHA. Make one script per preset, for
+    example "Ring: slow blue breathing", and run it from a dashboard or an
+    automation.
+
+
+    **Requires** the ZHA quirk `zha_quirks/aqara_t1m_ring.py` from this
+    blueprint's repository. Without it ZHA doesn't know the ring's effect
+    settings and the script fails.
+
+
+    To stop an effect, set the ring light to a plain color or turn it off.
+  domain: script
+  author: viktorhallen
+  source_url: https://github.com/viktorhallen/hass-blueprints/blob/main/blueprints/script/aqara_t1m_ring_effect.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    light_device:
+      name: Ceiling light
+      description: The T1M device.
+      selector:
+        device:
+          filter:
+            - integration: zha
+              model: lumi.light.acn032
+    ring_light:
+      name: Ring light
+      description: The T1M's RGB ring light entity (the color one, not the white main light).
+      selector:
+        entity:
+          filter:
+            - integration: zha
+              domain: light
+    effect:
+      name: Effect
+      default: breathing
+      selector:
+        select:
+          options:
+            - label: Flow 1
+              value: flow1
+            - label: Flow 2
+              value: flow2
+            - label: Fading
+              value: fading
+            - label: Hopping
+              value: hopping
+            - label: Breathing
+              value: breathing
+            - label: Rolling
+              value: rolling
+    speed:
+      name: Speed
+      default: 50
+      selector:
+        number:
+          min: 1
+          max: 100
+          unit_of_measurement: "%"
+          mode: slider
+    brightness:
+      name: Ring brightness
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+          unit_of_measurement: "%"
+          mode: slider
+    colors_section:
+      name: Colors
+      icon: mdi:palette
+      input:
+        color_1:
+          name: Color 1
+          default: [255, 0, 0]
+          selector:
+            color_rgb: {}
+        use_color_2:
+          name: Use color 2
+          default: true
+          selector:
+            boolean: {}
+        color_2:
+          name: Color 2
+          default: [0, 255, 0]
+          selector:
+            color_rgb: {}
+        use_color_3:
+          name: Use color 3
+          default: true
+          selector:
+            boolean: {}
+        color_3:
+          name: Color 3
+          default: [0, 0, 255]
+          selector:
+            color_rgb: {}
+        use_color_4:
+          name: Use color 4
+          default: false
+          selector:
+            boolean: {}
+        color_4:
+          name: Color 4
+          default: [255, 255, 255]
+          selector:
+            color_rgb: {}
+
+mode: restart
+
+variables:
+  light_device: !input light_device
+  effect: !input effect
+  speed: !input speed
+  color_1: !input color_1
+  color_2: !input color_2
+  color_3: !input color_3
+  color_4: !input color_4
+  use_color_2: !input use_color_2
+  use_color_3: !input use_color_3
+  use_color_4: !input use_color_4
+  ieee: >-
+    {% set ns = namespace(ieee='') %}
+    {% for domain, ident in device_attr(light_device, 'identifiers') or [] %}
+      {% if domain == 'zha' %}{% set ns.ieee = ident %}{% endif %}
+    {% endfor %}
+    {{ ns.ieee }}
+  colors: >-
+    {% set ns = namespace(list=[color_1]) %}
+    {% if use_color_2 %}{% set ns.list = ns.list + [color_2] %}{% endif %}
+    {% if use_color_3 %}{% set ns.list = ns.list + [color_3] %}{% endif %}
+    {% if use_color_4 %}{% set ns.list = ns.list + [color_4] %}{% endif %}
+    {{ ns.list }}
+  # Aqara packet: 0x00, number of colors, then per color CIE x and y scaled to
+  # 0-65535, big-endian. Same conversion as Zigbee2MQTT (sRGB -> XYZ -> xy).
+  # The "hex:" prefix keeps HA from reading the hex string as a number.
+  effect_colors_hex: >-
+    {% set ns = namespace(hex='00' ~ '%02x' | format(colors | count)) %}
+    {% for c in colors %}
+      {% set lin = namespace(v=[]) %}
+      {% for ch in c %}
+        {% set v = (ch | float) / 255 %}
+        {% set v = ((v + 0.055) / 1.055) ** 2.4 if v > 0.04045 else v / 12.92 %}
+        {% set lin.v = lin.v + [v] %}
+      {% endfor %}
+      {% set r, g, b = lin.v %}
+      {% set X = r * 0.4124564 + g * 0.3575761 + b * 0.1804375 %}
+      {% set Y = r * 0.2126729 + g * 0.7151522 + b * 0.072175 %}
+      {% set Z = r * 0.0193339 + g * 0.119192 + b * 0.9503041 %}
+      {% set s = X + Y + Z %}
+      {% set x = (X / s) if s > 0 else 0 %}
+      {% set y = (Y / s) if s > 0 else 0 %}
+      {% set ns.hex = ns.hex ~ '%04x' | format((x * 65535) | round(0) | int)
+                             ~ '%04x' | format((y * 65535) | round(0) | int) %}
+    {% endfor %}
+    hex:{{ ns.hex }}
+
+sequence:
+  - condition: template
+    value_template: "{{ ieee != '' }}"
+  - action: light.turn_on
+    target:
+      entity_id: !input ring_light
+    data:
+      brightness_pct: !input brightness
+  - action: zha.set_zigbee_cluster_attribute
+    data:
+      ieee: "{{ ieee }}"
+      endpoint_id: 1
+      cluster_id: 64704 # 0xFCC0, Aqara manufacturer cluster
+      cluster_type: in
+      attribute: effect_colors
+      value: "{{ effect_colors_hex }}"
+  - action: zha.set_zigbee_cluster_attribute
+    data:
+      ieee: "{{ ieee }}"
+      endpoint_id: 1
+      cluster_id: 64704
+      cluster_type: in
+      attribute: effect
+      value: "{{ effect }}"
+  - action: zha.set_zigbee_cluster_attribute
+    data:
+      ieee: "{{ ieee }}"
+      endpoint_id: 1
+      cluster_id: 64704
+      cluster_type: in
+      attribute: effect_speed
+      value: "{{ speed | int }}"
